@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>レースAI：操作を知らないところから最速ラインを学ぶ</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;900&display=swap">
+<style>
+:root{--bg:#e8ecef;--card:#fff;--ink:#13202b;--mute:#5d6b77;--line:#cbd3da;--acc:#1f5eff;--brk:#d6342c;--gold:#c98f00;color-scheme:light;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10171d;--card:#1a242d;--ink:#e6edf3;--mute:#93a2af;--line:#2b3946;--acc:#5b8cff;--brk:#ff6a5f;--gold:#f0b72f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10171d;--card:#1a242d;--ink:#e6edf3;--mute:#93a2af;--line:#2b3946;--acc:#5b8cff;--brk:#ff6a5f;--gold:#f0b72f;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;line-height:1.6}
+main{max-width:1320px;margin:0 auto;padding:20px 14px 32px}
+h1{font-size:clamp(22px,4.4vw,34px);font-weight:900;margin:0 0 4px}
+p.lead{margin:0 0 16px;color:var(--mute);max-width:70ch}
+.stage{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+canvas{display:block;width:100%;height:auto}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.stats div{padding:10px 12px;border-right:1px solid var(--line)}
+.stats div:last-child{border-right:0}
+small{color:var(--mute);font-size:12px}
+.stats small{display:block}
+.stats b{font-size:clamp(17px,3.4vw,24px);font-variant-numeric:tabular-nums}
+.pedals{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:12px;border-top:1px solid var(--line)}
+.pedals small{display:block;margin-bottom:4px}
+.bar{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+.bar i{display:block;height:100%;width:0}
+.ctl{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin-top:12px}
+button,select{font:inherit;font-weight:500;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 14px;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+label{color:var(--mute);display:flex;gap:8px;align-items:center}
+label b{color:var(--ink);min-width:2.2em;font-variant-numeric:tabular-nums}
+.r{margin-left:auto}
+.secs{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));border-top:1px solid var(--line);font-variant-numeric:tabular-nums}.secs div{padding:6px 10px;border-right:1px solid var(--line)}.secs small{display:block}.secs b{font-size:14px}.secs .tot{background:var(--bg)}.secs .tot b{color:var(--acc)}#gc{border-top:1px solid var(--line)}
+.note{margin-top:14px;color:var(--mute);font-size:14px;max-width:80ch}
+#hint{color:var(--acc);font-weight:500}
+@media (max-width:520px){.stats{grid-template-columns:repeat(2,1fr)}.stats div:nth-child(2){border-right:0}.stats div:nth-child(-n+2){border-bottom:1px solid var(--line)}.r{margin-left:0}}
+</style>
+</head>
+<body>
+<main>
+<h1>レースAI：ゼロから最速ラインを学ぶ</h1>
+<p class="lead">最初のAIは、ハンドルもアクセルもブレーキも何のためにあるのか知りません。壁にぶつかる・止まる・遠くまで進む、という結果だけで世代ごとに賢くなります。</p>
+<div class="stage">
+<canvas id="cv" width="1280" height="800" aria-label="レース場とAIの車"></canvas>
+<div class="stats">
+<div><small>世代</small><b id="sGen">1</b></div>
+<div><small>走行中</small><b id="sAlive">60</b></div>
+<div><small>先頭の進捗</small><b id="sPct">0%</b></div>
+<div><small>ベストタイム</small><b id="sBest">―</b></div>
+</div>
+<div class="pedals" aria-label="先頭車の操作">
+<div><small>アクセル</small><div class="bar"><i id="mAcc" style="background:var(--acc)"></i></div></div>
+<div><small>ブレーキ</small><div class="bar"><i id="mBrk" style="background:var(--brk)"></i></div></div>
+<div><small>速度</small><div class="bar"><i id="mSpd" style="background:var(--gold)"></i></div></div>
+</div>
+<div class="secs" id="secs" aria-label="区間ベスト"></div>
+<div class="secs" id="evalb" style="display:none" aria-label="全コース評価"></div>
+<canvas id="gc" width="1280" height="220" aria-label="学習グラフ"></canvas>
+</div>
+<div class="ctl">
+<label>コース<select id="pre"></select></label>
+<label>コース幅<input type="range" id="wid" min="20" max="48" value="32"><b id="wv">32</b></label>
+<label>走行台数<input type="range" id="pop" min="10" max="5000" step="10" value="150"><b id="pv">150</b></label>
+<button id="edt">コースを編集</button>
+</div>
+<div class="ctl">
+<label><input type="checkbox" id="part">区間だけ学習</label>
+<label>開始<input type="range" id="sa" min="0" max="95" value="0"><b id="sav">0%</b></label>
+<label>終了<input type="range" id="sb" min="5" max="100" value="100"><b id="sbv">100%</b></label>
+<label>区間数<input type="range" id="kn" min="2" max="24" value="8"><b id="knv">8</b></label>
+<label><input type="checkbox" id="showSec" checked>区間最速ラインを表示</label>
+<label><input type="checkbox" id="keep" checked>変更しても学習を引き継ぐ</label>
+</div>
+<div class="ctl">
+<button id="gbtn">経路を描く（人間の案内）</button><button id="gclr">経路を消す</button>
+<label>ガイドの強さ<input type="range" id="gw" min="0" max="200" value="100"><b id="gwv">100%</b></label>
+<label><input type="checkbox" id="integ">統合モード（全コースの学習結果を反映）</label>
+</div>
+<div class="ctl">
+<button data-s="1" class="on">×1</button><button data-s="4">×4</button><button data-s="16">×16</button><button data-s="64">×64</button><button data-s="256">×256</button><button data-s="1024">×1024</button>
+<button id="rst">最初からやり直す</button>
+
+</div>
+<p class="note" id="hint" hidden>編集中：点をドラッグで移動、コースの近くをクリックで追加、ダブルクリックか右クリックで削除（4点以上）。最初の点（太い輪）がスタート位置です。変更すると学習は最初からやり直しになり、編集中は走行が止まります。</p>
+<p class="note" id="ghint" hidden>経路を描く：コース上をなぞると、オレンジの点線が案内になります。案内に近いところを走って進んだ車ほど評価が上がります（強さはスライダーで調整）。何本でも描けます。統合モードでは、コースを3世代ごとに切り替えながら、各コースで一番良かった脳みそを全コースの学習に混ぜ、今の先頭車を全コースで走らせた結果を表示します。</p>
+<p class="note">金色の線が、これまでに最も速く1周した車の走行ライン。車は5本のセンサーで壁までの距離と自分の速度だけを見て、ハンドルとアクセル／ブレーキを決めます。コースが交差したり狭すぎたりすると、AIが走り切れないことがあります。「区間だけ学習」を入れると、青く塗られた区間だけを走行中の速度で走らせて集中的に学習します。区間を広げたりコースを編集したりしても、「学習を引き継ぐ」がオンなら今の学習結果から続けます。さらに、コースを8区間に分けて区間ごとの最速タイム（区間ベスト）を記録します。区間ベストを出した車の脳みそは次の世代に残り、交配の相手としても優先して使われます。区間のタイムが速い車は、進み具合に加えて評価も上がります。</p>
+</main>
+<script>
+const W=1280,H=800,VM=6,MAXT=2600,NI=6,NH=8,NO=2,NW=NH*(NI+1)+NO*(NH+1),RM=170;
+let HW=32,POP=150,ELITE=4,speed=1,edit=false,drag=-1,dirty=true,part=false,secA=0,secB=100,SI=0,LEN=1,secBest=[],secW=[],bnd=[],secH='',secP=[],K=8,hist=[],hof=[],ci=0,integ=false,gmode=false,gs=[],gt=[],gw=1;
+const ANG=[-70,-35,0,35,70].map(d=>d*Math.PI/180);
+const S=a=>a.map(p=>[p[0]*4/3,p[1]*4/3]);
+const PRE={
+'サーキット':S([[160,120],[430,90],[720,110],[870,220],[800,330],[620,320],[560,410],[670,495],[480,540],[280,500],[200,400],[340,325],[150,290],[90,190]]),
+'オーバル':Array.from({length:10},(_,i)=>{const t=i/10*6.2832;return[640+500*Math.cos(t),400+270*Math.sin(t)]}),
+'うねうね':[[140,130],[500,110],[760,200],[1000,120],[1160,260],[1000,380],[760,330],[560,430],[760,560],[1140,600],[1100,720],[700,700],[400,620],[200,700],[110,500],[260,380],[110,260]],
+'三角シケイン':[[200,150],[640,90],[1080,150],[1190,400],[1020,640],[760,520],[640,680],[400,700],[220,620],[100,400]],
+'ヘアピン蛇行':[[140,130],[1100,130],[1170,230],[1100,330],[300,330],[190,430],[300,530],[1100,530],[1170,630],[1100,710],[140,710],[70,420]]};
+let P=PRE['サーキット'].map(p=>p.slice()),RAW,C,N,ta,mask;
+const NAMES=Object.keys(PRE),ROT=3,mcache={};
+const cr=(a,b,c,d,t)=>[0,1].map(i=>.5*(2*b[i]+(-a[i]+c[i])*t+(2*a[i]-5*b[i]+4*c[i]-d[i])*t*t+(-a[i]+3*b[i]-3*c[i]+d[i])*t*t*t));
+function mk(){const c=document.createElement('canvas');c.width=W;c.height=H;return c}
+const tc=mk(),tx=tc.getContext('2d'),mc=mk(),mx=mc.getContext('2d',{willReadFrequently:true});
+function path(x){x.beginPath();C.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath()}
+function build(){
+const n=P.length;RAW=[];
+for(let i=0;i<n;i++)for(let k=0;k<40;k++)RAW.push(cr(P[(i+n-1)%n],P[i],P[(i+1)%n],P[(i+2)%n],k/40));
+const L=[0];for(let i=1;i<=RAW.length;i++){const a=RAW[i-1],b=RAW[i%RAW.length];L.push(L[i-1]+Math.hypot(b[0]-a[0],b[1]-a[1]))}
+const tot=L[L.length-1],cnt=Math.max(8,Math.round(tot/5));C=[];let j=0;
+for(let k=0;k<cnt;k++){const s=k*tot/cnt;while(L[j+1]<s)j++;const a=RAW[j],b=RAW[(j+1)%RAW.length],f=(s-L[j])/(L[j+1]-L[j]||1);C.push([a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f])}
+N=C.length;ta=Math.atan2(C[1][1]-C[0][1],C[1][0]-C[0][0]);
+tx.fillStyle='#2e4733';tx.fillRect(0,0,W,H);tx.lineJoin='round';
+path(tx);tx.strokeStyle='#e9e6dc';tx.lineWidth=HW*2+6;tx.stroke();
+path(tx);tx.strokeStyle='#585e66';tx.lineWidth=HW*2;tx.stroke();
+tx.setLineDash([10,14]);path(tx);tx.strokeStyle='rgba(255,255,255,.22)';tx.lineWidth=2;tx.stroke();tx.setLineDash([]);
+tx.save();tx.translate(C[0][0],C[0][1]);tx.rotate(ta);tx.fillStyle='#fff';tx.fillRect(-3,-HW,6,HW*2);tx.restore();
+mx.clearRect(0,0,W,H);path(mx);mx.strokeStyle='#000';mx.lineWidth=HW*2-2;mx.lineJoin='round';mx.stroke();
+mask=mx.getImageData(0,0,W,H).data}
+const on=(x,y)=>{x|=0;y|=0;return x>=0&&y>=0&&x<W&&y<H&&mask[(y*W+x)*4+3]>0};
+const gauss=()=>Math.sqrt(-2*Math.log(Math.random()||1e-9))*Math.cos(6.2832*Math.random());
+function mkC(pts){const n=pts.length,r=[];for(let i=0;i<n;i++)for(let k=0;k<40;k++)r.push(cr(pts[(i+n-1)%n],pts[i],pts[(i+1)%n],pts[(i+2)%n],k/40));
+const L=[0];for(let i=1;i<=r.length;i++){const a=r[i-1],b=r[i%r.length];L.push(L[i-1]+Math.hypot(b[0]-a[0],b[1]-a[1]))}
+const tot=L[L.length-1],cnt=Math.max(8,Math.round(tot/5)),o=[];let j=0;
+for(let k=0;k<cnt;k++){const s=k*tot/cnt;while(L[j+1]<s)j++;const a=r[j],b=r[(j+1)%r.length],f=(s-L[j])/(L[j+1]-L[j]||1);o.push([a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f])}return o}
+function cacheCourse(nm){const key=nm+'|'+HW;if(mcache[key])return mcache[key];
+const c2=mkC(PRE[nm]),sv=C;C=c2;mx.clearRect(0,0,W,H);path(mx);mx.strokeStyle='#000';mx.lineWidth=HW*2-2;mx.lineJoin='round';mx.stroke();C=sv;
+const p=c2[0],q=c2[1];return mcache[key]={C:c2,N:c2.length,ta:Math.atan2(q[1]-p[1],q[0]-p[0]),mask:mx.getImageData(0,0,W,H).data}}
+function evalAll(w){const sv=[C,N,ta,mask,SI,LEN,bnd,part],out=[];part=false;
+for(const nm of NAMES){const o=cacheCourse(nm);C=o.C;N=o.N;ta=o.ta;mask=o.mask;SI=0;LEN=N;bnd=Array.from({length:K+1},(_,k)=>Math.round(k*LEN/K));
+const c=new Car(new Brain(w));while(c.alive)c.step();out.push([nm,Math.min(100,Math.round(c.max/N*100)),c.done?c.t:0])}
+[C,N,ta,mask,SI,LEN,bnd,part]=sv;return out}
+function mkGuide(){gt=C.map(p=>{let b=null,bd=(HW*1.3)**2;for(const s of gs)for(const q of s){const d=(q[0]-p[0])**2+(q[1]-p[1])**2;if(d<bd){bd=d;b=q}}return b})}
+function drawGraph(){const g=$('gc'),x=g.getContext('2d'),w=g.width,h=g.height,cs=getComputedStyle(document.documentElement),V=n=>cs.getPropertyValue(n).trim()||'#888';
+x.clearRect(0,0,w,h);const L=60,R=70,T=28,B=26,pw=w-L-R,ph=h-T-B,n=hist.length;
+x.font='14px sans-serif';x.lineWidth=1;
+const tv=hist.flatMap(d=>[d.lap,d.tot]).filter(v=>v>0),tmax=Math.ceil(Math.max(...tv,1));
+for(let i=0;i<=4;i++){const y=T+ph*i/4;x.strokeStyle=V('--line');x.beginPath();x.moveTo(L,y);x.lineTo(w-R,y);x.stroke();x.fillStyle=V('--mute');x.textAlign='right';x.fillText(100-i*25+'%',L-8,y+4);x.textAlign='left';x.fillText((tmax*(1-i/4)).toFixed(1)+'秒',w-R+8,y+4)}
+[['到達率（左軸）','--acc'],['ベストラップ（右軸）','--gold'],['区間最速の合計（右軸）','--brk']].forEach(([t,c],i)=>{x.fillStyle=V(c);x.fillRect(L+i*230,10,14,6);x.fillStyle=V('--ink');x.textAlign='left';x.fillText(t,L+i*230+20,17)});
+if(n<2){x.fillStyle=V('--mute');x.textAlign='left';x.fillText('世代が進むと、ここに学習の推移が出ます',L+12,T+ph/2);return}
+const xs=i=>L+pw*i/(n-1);
+hist.forEach((d,i)=>{if(d.m){x.setLineDash([4,4]);x.strokeStyle=V('--mute');x.beginPath();x.moveTo(xs(i),T);x.lineTo(xs(i),T+ph);x.stroke();x.setLineDash([])}});
+const line=(key,col,fn)=>{x.beginPath();let on=false;hist.forEach((d,i)=>{const v=d[key];if(v==null||d.m){on=false;return}const px=xs(i),py=fn(v);on?x.lineTo(px,py):x.moveTo(px,py);on=true});x.strokeStyle=col;x.lineWidth=2;x.stroke()};
+line('pct',V('--acc'),v=>T+ph*(1-v/100));line('lap',V('--gold'),v=>T+ph*(1-v/tmax));line('tot',V('--brk'),v=>T+ph*(1-v/tmax));
+const gl=hist.filter(d=>d.g);x.fillStyle=V('--mute');x.textAlign='left';x.fillText('世代 '+gl[0].g,L,h-6);x.textAlign='right';x.fillText('世代 '+gl[gl.length-1].g+'（点線＝コース変更）',w-R,h-6)}
+class Brain{
+constructor(w){this.w=w||Float32Array.from({length:NW},gauss)}
+f(inp){const w=this.w,h=[];let k=0;
+for(let j=0;j<NH;j++){let s=w[k++];for(let i=0;i<NI;i++)s+=w[k++]*inp[i];h.push(Math.tanh(s))}
+const o=[];for(let j=0;j<NO;j++){let s=w[k++];for(let i=0;i<NH;i++)s+=w[k++]*h[i];o.push(Math.tanh(s))}return o}}
+class Car{
+constructor(b){this.b=b;const q=C[SI],q2=C[(SI+1)%N];this.x=q[0];this.y=q[1];this.a=Math.atan2(q2[1]-q[1],q2[0]-q[0]);this.v=part?3:0;this.idx=SI;this.prog=0;this.sec=[];this.gr=0;this.max=0;this.t=0;this.last=0;this.alive=true;this.done=false;this.path=[];this.fit=0;this.rays=[];this.thr=0}
+step(){
+const inp=[];this.rays=[];
+for(const d of ANG){let r=0;const ca=Math.cos(this.a+d),sa=Math.sin(this.a+d);while(r<RM&&on(this.x+ca*r,this.y+sa*r))r+=4;this.rays.push(r);inp.push(r/RM)}
+inp.push(this.v/VM);
+const[st,th]=this.b.f(inp);this.thr=th;
+this.v+=th>0?th*.16:th*.4;this.v=Math.min(VM,Math.max(0,this.v*.992));
+this.a+=st*.075*Math.min(1,this.v)/(1+this.v*this.v*.07);
+this.x+=Math.cos(this.a)*this.v;this.y+=Math.sin(this.a)*this.v;this.t++;
+let best=this.idx,bd=1e9;
+for(let d=-6;d<=14;d++){const j=(this.idx+d+N)%N,dx=C[j][0]-this.x,dy=C[j][1]-this.y,dd=dx*dx+dy*dy;if(dd<bd){bd=dd;best=j}}
+let dl=best-this.idx;if(dl>N/2)dl-=N;if(dl<-N/2)dl+=N;
+this.idx=best;this.prog+=dl;
+if(this.prog>this.max){const g=gt[this.idx];if(g)this.gr+=(this.prog-this.max)*Math.max(0,1-Math.hypot(this.x-g[0],this.y-g[1])/HW);this.max=this.prog;this.last=this.t}
+while(this.sec.length<K&&this.max>=bnd[this.sec.length+1])this.sec.push(this.t);
+if(this.t%3==0)this.path.push([this.x,this.y]);
+if(this.max>=LEN){this.done=true;this.alive=false}
+else if(!on(this.x,this.y)||this.t-this.last>100||this.t>MAXT)this.alive=false}}
+let cars,gen,bestT,bestPath,allBest;
+const $=id=>document.getElementById(id);
+function sect(){SI=part?Math.round(secA/100*N)%N:0;LEN=part?Math.max(4,Math.round((secB-secA)/100*N)):N;bnd=Array.from({length:K+1},(_,k)=>Math.round(k*LEN/K))}
+function init(keep){
+const bs=keep&&cars&&cars.length?cars.slice().sort((a,b)=>(b.fit||b.max)-(a.fit||a.max)).map(c=>c.b):null;
+if(!bs)gen=1;bestT=Infinity;bestPath=null;allBest=0;sect();mkGuide();secBest=Array(K).fill(Infinity);secW=Array(K).fill(null);secP=Array(K).fill(null);ELITE=Math.max(2,Math.round(POP*.07));
+cars=Array.from({length:POP},(_,i)=>{if(!bs)return new Car(new Brain());const w=bs[i%bs.length].w.slice();if(i>=bs.length)for(let j=0;j<NW;j++)if(Math.random()<.1)w[j]+=gauss()*.2;return new Car(new Brain(w))})}
+function endGen(){
+const gb=Array(K).fill(null);
+for(const c of cars)for(let k=0;k<c.sec.length;k++){const d=Math.max(1,c.sec[k]-(k?c.sec[k-1]:0));if(!gb[k]||d<gb[k].d)gb[k]={d,c}}
+for(let k=0;k<K;k++)if(gb[k]&&gb[k].d<secBest[k]){secBest[k]=gb[k].d;secW[k]=gb[k].c.b.w.slice();const c=gb[k].c,te=c.sec[k],ts=k?c.sec[k-1]:0;secP[k]=c.path.slice(Math.max(0,Math.ceil(ts/3)-1),Math.floor(te/3)+1)}
+for(const c of cars){let sb=0;for(let k=0;k<c.sec.length;k++){const d=Math.max(1,c.sec[k]-(k?c.sec[k-1]:0));sb+=50*Math.pow(secBest[k]/d,2)}
+c.fit=Math.min(c.max,LEN)+sb+gw*c.gr+(c.done?1000+(MAXT-c.t)*2:0);
+if(c.done&&c.t<bestT){bestT=c.t;bestPath=c.path}}
+cars.sort((a,b)=>b.fit-a.fit);
+hist.push({g:gen,pct:Math.min(100,cars.reduce((a,c)=>Math.max(a,c.max),0)/LEN*100),lap:bestT<Infinity?bestT/60:null,tot:secBest.every(v=>v<Infinity)?secBest.reduce((a,v)=>a+v,0)/60:null});
+if(integ){const r=evalAll(cars[0].b.w),s=r.reduce((a,v)=>a+v[1]+(v[2]?50:0),0);if(!hof[ci]||s>=hof[ci].s)hof[ci]={w:cars[0].b.w.slice(),s};
+$('evalb').innerHTML=r.map(v=>'<div><small>'+v[0]+'</small><b>'+v[1]+'%'+(v[2]?' / '+(v[2]/60).toFixed(1)+'秒':'')+'</b></div>').join('');
+if(gen%ROT==0){ci=(ci+1)%NAMES.length;P=PRE[NAMES[ci]].map(p=>p.slice());$('pre').value=NAMES[ci];dirty=true}}
+drawGraph();
+const ms=Math.max(.08,.4*Math.pow(.985,gen)),mr=.12,pool=cars.slice(0,Math.max(2,POP>>1));
+const pick=()=>{const a=pool[Math.random()*pool.length|0],b=pool[Math.random()*pool.length|0];return a.fit>b.fit?a:b};
+const nb=[];
+for(let i=0;i<ELITE;i++)nb.push(new Brain(cars[i].b.w.slice()));
+for(const w of hof.filter(Boolean).map(h=>h.w).concat(secW))if(w&&nb.length<Math.ceil(POP*.4))nb.push(new Brain(w.slice()));
+while(nb.length<POP){
+if(Math.random()<.08){nb.push(new Brain());continue}
+const sp=hof.filter(Boolean).map(h=>h.w).concat(secW.filter(Boolean)),p1=sp.length&&Math.random()<.35?sp[Math.random()*sp.length|0]:pick().b.w,p2=pick().b.w,w=new Float32Array(NW);
+for(let i=0;i<NW;i++){w[i]=Math.random()<.5?p1[i]:p2[i];if(Math.random()<mr)w[i]+=gauss()*ms}
+nb.push(new Brain(w))}
+cars=nb.map(b=>new Car(b));gen++}
+const cv=$('cv'),ctx=cv.getContext('2d');
+function draw(){
+ctx.drawImage(tc,0,0);
+ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=2;
+for(let k=0;k<K;k++){const i=(SI+bnd[k])%N,p=C[i],q=C[(i+1)%N],a=Math.atan2(q[1]-p[1],q[0]-p[0])+1.5708;ctx.beginPath();ctx.moveTo(p[0]-Math.cos(a)*HW,p[1]-Math.sin(a)*HW);ctx.lineTo(p[0]+Math.cos(a)*HW,p[1]+Math.sin(a)*HW);ctx.stroke()}
+if(part){ctx.beginPath();for(let k=0;k<=LEN;k++){const p=C[(SI+k)%N];k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])}ctx.strokeStyle='rgba(91,140,255,.4)';ctx.lineWidth=HW*2-6;ctx.lineJoin='round';ctx.stroke()}
+if(bestPath){ctx.beginPath();bestPath.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle='#f0b72f';ctx.lineWidth=2.5;ctx.stroke()}
+let lead=null,al=0;
+for(const c of cars)if(c.alive){al++;if(!lead||c.max>lead.max)lead=c}
+if($('showSec').checked)secP.forEach((s,k)=>{if(!s||s.length<2)return;ctx.beginPath();s.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.strokeStyle='hsl('+Math.round(k*360/K)+' 80% 55%)';ctx.lineWidth=3;ctx.stroke()});
+ctx.setLineDash([8,6]);ctx.strokeStyle='#ff9f1c';ctx.lineWidth=3;gs.forEach(s=>{if(s.length<2)return;ctx.beginPath();s.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke()});ctx.setLineDash([]);
+if(POP>400){ctx.globalAlpha=.5;ctx.fillStyle='#e8eef5';for(const c of cars)if(c.alive)ctx.fillRect(c.x-2,c.y-2,4,4);ctx.globalAlpha=1}else for(const c of cars){if(!c.alive)continue;ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);ctx.globalAlpha=.55;ctx.fillStyle='#e8eef5';ctx.fillRect(-6,-3.5,12,7);ctx.restore()}
+if(lead){
+
+
+$('mAcc').style.width=Math.max(0,lead.thr)*100+'%';$('mBrk').style.width=Math.max(0,-lead.thr)*100+'%';$('mSpd').style.width=lead.v/VM*100+'%';
+$('sPct').textContent=Math.min(100,Math.round(lead.max/LEN*100))+'%'}
+if(edit)P.forEach((p,i)=>{ctx.beginPath();ctx.arc(p[0],p[1],i?9:12,0,6.2832);ctx.fillStyle=i?'#fff':'#f0b72f';ctx.fill();ctx.lineWidth=i?2.5:4;ctx.strokeStyle='#1f5eff';ctx.stroke()});
+$('sGen').textContent=gen;$('sAlive').textContent=al;
+const ok=secBest.every(v=>v<Infinity),tt=secBest.reduce((a,v)=>a+(v<Infinity?v:0),0),h='<div class="tot"><small>区間最速の合計</small><b>'+(ok?(tt/60).toFixed(2)+'秒':'―')+'</b></div>'+secBest.map((v,k)=>'<div style="border-top:3px solid hsl('+Math.round(k*360/K)+' 70% 50%)"><small>区間'+(k+1)+'</small><b>'+(v<Infinity?(v/60).toFixed(2)+'秒':'―')+'</b></div>').join('');if(h!==secH){secH=h;$('secs').innerHTML=h}
+$('sBest').textContent=bestT<Infinity?(bestT/60).toFixed(2)+'秒':'―'}
+function frame(){
+if(dirty){const k=!!cars&&($('keep').checked||integ);build();init(k);if(k&&hist.length&&!hist[hist.length-1].m)hist.push({m:1});if(!k)hist=[];dirty=false}
+if(!edit){const t0=performance.now();for(let s=0;s<speed;s++){let al=0;for(const c of cars)if(c.alive){c.step();al++}if(!al)endGen();if(performance.now()-t0>30)break}}
+draw();requestAnimationFrame(frame)}
+const pos=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
+const near=(x,y)=>{let b=-1,bd=24*24;P.forEach((p,i)=>{const d=(p[0]-x)**2+(p[1]-y)**2;if(d<bd){bd=d;b=i}});return b};
+const cl=(v,m)=>Math.min(m-30,Math.max(30,v));
+cv.onpointerdown=e=>{if(gmode){const[x,y]=pos(e);gs.push([[x,y]]);drag=-2;cv.setPointerCapture(e.pointerId);return}if(!edit)return;const[x,y]=pos(e);let i=near(x,y);
+if(i<0){let bi=0,bd=1e9;RAW.forEach((p,j)=>{const d=(p[0]-x)**2+(p[1]-y)**2;if(d<bd){bd=d;bi=j}});i=(bi/40|0)+1;P.splice(i,0,[cl(x,W),cl(y,H)]);dirty=true}
+drag=i;cv.setPointerCapture(e.pointerId)};
+cv.onpointermove=e=>{if(drag===-2){const[x,y]=pos(e),s=gs[gs.length-1],l=s[s.length-1];if(Math.hypot(x-l[0],y-l[1])>6)s.push([x,y]);return}if(drag<0)return;const[x,y]=pos(e);P[drag]=[cl(x,W),cl(y,H)];dirty=true};
+cv.onpointerup=()=>{if(drag===-2)mkGuide();drag=-1};
+const del=e=>{if(!edit)return;e.preventDefault();const[x,y]=pos(e),i=near(x,y);if(i>=0&&P.length>4){P.splice(i,1);dirty=true}};
+cv.ondblclick=del;cv.oncontextmenu=del;
+Object.keys(PRE).forEach(k=>{const o=document.createElement('option');o.textContent=k;$('pre').append(o)});
+$('pre').onchange=e=>{P=PRE[e.target.value].map(p=>p.slice());dirty=true};
+$('wid').oninput=e=>$('wv').textContent=e.target.value;
+$('wid').onchange=e=>{HW=+e.target.value;dirty=true};
+$('pop').oninput=e=>$('pv').textContent=e.target.value;
+$('pop').onchange=e=>{POP=+e.target.value;init($('keep').checked)};
+$('edt').onclick=()=>{edit=!edit;drag=-1;$('edt').classList.toggle('on',edit);$('edt').textContent=edit?'編集を終えて走らせる':'コースを編集';$('hint').hidden=!edit;cv.style.touchAction=edit?'none':'';cv.style.cursor=edit?'crosshair':''};
+document.querySelectorAll('button[data-s]').forEach(b=>b.onclick=()=>{speed=+b.dataset.s;document.querySelectorAll('button[data-s]').forEach(x=>x.classList.toggle('on',x===b))});
+$('rst').onclick=()=>{hist=[];hof=[];init(false);drawGraph()};
+$('gbtn').onclick=()=>{gmode=!gmode;if(gmode&&edit)$('edt').click();$('gbtn').classList.toggle('on',gmode);$('ghint').hidden=!gmode;cv.style.touchAction=gmode?'none':'';cv.style.cursor=gmode?'crosshair':''};
+$('gclr').onclick=()=>{gs=[];mkGuide()};
+$('gw').oninput=e=>{gw=+e.target.value/100;$('gwv').textContent=e.target.value+'%'};
+$('integ').onchange=e=>{integ=e.target.checked;$('evalb').style.display=integ?'':'none';if(integ){ci=Math.max(0,NAMES.indexOf($('pre').value));$('keep').checked=true}};
+drawGraph();
+$('kn').oninput=e=>$('knv').textContent=e.target.value;
+$('kn').onchange=e=>{K=+e.target.value;init($('keep').checked)};
+const sync=()=>{part=$('part').checked;secA=+$('sa').value;secB=Math.max(+$('sb').value,secA+5);$('sb').value=secB;$('sav').textContent=secA+'%';$('sbv').textContent=secB+'%'};
+$('sa').oninput=$('sb').oninput=sync;
+['part','sa','sb'].forEach(id=>$(id).onchange=()=>{sync();init($('keep').checked)});
+frame();
+</script>
+</body>
+</html>
