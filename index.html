@@ -79,6 +79,7 @@ label b{color:var(--ink);min-width:2.2em;font-variant-numeric:tabular-nums}
 <div class="ctl">
 <button id="gbtn">経路を描く（人間の案内）</button><button id="gclr">経路を消す</button>
 <label>ガイドの強さ<input type="range" id="gw" min="0" max="200" value="100"><b id="gwv">100%</b></label>
+<label>最速車の重みの強さ<input type="range" id="bw" min="0" max="100" value="0"><b id="bwv">0%</b></label>
 <label><input type="checkbox" id="integ">統合モード（全コースの学習結果を反映）</label>
 </div>
 <div class="ctl">
@@ -92,7 +93,7 @@ label b{color:var(--ink);min-width:2.2em;font-variant-numeric:tabular-nums}
 </main>
 <script>
 const W=1280,H=800,VM=6,MAXT=2600,NI=6,NH=8,NO=2,NW=NH*(NI+1)+NO*(NH+1),RM=170;
-let HW=32,POP=150,ELITE=4,speed=1,edit=false,drag=-1,dirty=true,part=false,secA=0,secB=100,SI=0,LEN=1,secBest=[],secW=[],bnd=[],secH='',secP=[],K=8,hist=[],hof=[],ci=0,integ=false,gmode=false,gs=[],gt=[],gw=1;
+let HW=32,POP=150,ELITE=4,speed=1,edit=false,drag=-1,dirty=true,part=false,secA=0,secB=100,SI=0,LEN=1,secBest=[],secW=[],bnd=[],secH='',secP=[],K=8,hist=[],hof=[],ci=0,integ=false,gmode=false,gs=[],gt=[],gw=1,bs=0;
 const ANG=[-70,-35,0,35,70].map(d=>d*Math.PI/180);
 const S=a=>a.map(p=>[p[0]*4/3,p[1]*4/3]);
 const PRE={
@@ -199,7 +200,7 @@ for(const w of hof.filter(Boolean).map(h=>h.w).concat(secW))if(w&&nb.length<Math
 while(nb.length<POP){
 if(Math.random()<.08){nb.push(new Brain());continue}
 const sp=hof.filter(Boolean).map(h=>h.w).concat(secW.filter(Boolean)),p1=sp.length&&Math.random()<.35?sp[Math.random()*sp.length|0]:pick().b.w,p2=pick().b.w,w=new Float32Array(NW);
-for(let i=0;i<NW;i++){w[i]=Math.random()<.5?p1[i]:p2[i];if(Math.random()<mr)w[i]+=gauss()*ms}
+const bw=cars[0].b.w;for(let i=0;i<NW;i++){w[i]=Math.random()<.5?p1[i]:p2[i];if(bs)w[i]+=(bw[i]-w[i])*bs;if(Math.random()<mr)w[i]+=gauss()*ms}
 nb.push(new Brain(w))}
 cars=nb.map(b=>new Car(b));gen++}
 const cv=$('cv'),ctx=cv.getContext('2d');
@@ -248,6 +249,7 @@ document.querySelectorAll('button[data-s]').forEach(b=>b.onclick=()=>{speed=+b.d
 $('rst').onclick=()=>{hist=[];hof=[];init(false);drawGraph()};
 $('gbtn').onclick=()=>{gmode=!gmode;if(gmode&&edit)$('edt').click();$('gbtn').classList.toggle('on',gmode);$('ghint').hidden=!gmode;cv.style.touchAction=gmode?'none':'';cv.style.cursor=gmode?'crosshair':''};
 $('gclr').onclick=()=>{gs=[];mkGuide()};
+$('bw').oninput=e=>{bs=+e.target.value/100;$('bwv').textContent=e.target.value+'%'};
 $('gw').oninput=e=>{gw=+e.target.value/100;$('gwv').textContent=e.target.value+'%'};
 $('integ').onchange=e=>{integ=e.target.checked;$('evalb').style.display=integ?'':'none';if(integ){ci=Math.max(0,NAMES.indexOf($('pre').value));$('keep').checked=true}};
 drawGraph();
