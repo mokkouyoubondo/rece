@@ -65,7 +65,7 @@ label b{color:var(--ink);min-width:2.2em;font-variant-numeric:tabular-nums}
 <div class="ctl">
 <label>コース<select id="pre"></select></label>
 <label>コース幅<input type="range" id="wid" min="20" max="48" value="32"><b id="wv">32</b></label>
-<label>走行台数<input type="range" id="pop" min="10" max="5000" step="10" value="150"><b id="pv">150</b></label>
+<label>走行台数<input type="range" id="pop" min="10" max="10000" step="10" value="150"><b id="pv">150</b></label>
 <button id="edt">コースを編集</button>
 </div>
 <div class="ctl">
@@ -79,6 +79,7 @@ label b{color:var(--ink);min-width:2.2em;font-variant-numeric:tabular-nums}
 <div class="ctl">
 <button id="gbtn">経路を描く（人間の案内）</button><button id="gclr">経路を消す</button>
 <label>ガイドの強さ<input type="range" id="gw" min="0" max="200" value="100"><b id="gwv">100%</b></label>
+<label>速さの重み<input type="range" id="sw" min="0" max="200" value="50"><b id="swv">50%</b></label>
 <label>最速車の重みの強さ<input type="range" id="bw" min="0" max="100" value="0"><b id="bwv">0%</b></label>
 <label><input type="checkbox" id="integ">統合モード（全コースの学習結果を反映）</label>
 </div>
@@ -93,7 +94,7 @@ label b{color:var(--ink);min-width:2.2em;font-variant-numeric:tabular-nums}
 </main>
 <script>
 const W=1280,H=800,VM=6,MAXT=2600,NI=6,NH=8,NO=2,NW=NH*(NI+1)+NO*(NH+1),RM=170;
-let HW=32,POP=150,ELITE=4,speed=1,edit=false,drag=-1,dirty=true,part=false,secA=0,secB=100,SI=0,LEN=1,secBest=[],secW=[],bnd=[],secH='',secP=[],K=8,hist=[],hof=[],ci=0,integ=false,gmode=false,gs=[],gt=[],gw=1,bs=0;
+let HW=32,POP=150,ELITE=4,speed=1,edit=false,drag=-1,dirty=true,part=false,secA=0,secB=100,SI=0,LEN=1,secBest=[],secW=[],bnd=[],secH='',secP=[],K=8,hist=[],hof=[],ci=0,integ=false,gmode=false,gs=[],gt=[],gw=1,bs=0,PS=3,ws=.5;
 const ANG=[-70,-35,0,35,70].map(d=>d*Math.PI/180);
 const S=a=>a.map(p=>[p[0]*4/3,p[1]*4/3]);
 const PRE={
@@ -103,7 +104,7 @@ const PRE={
 '三角シケイン':[[200,150],[640,90],[1080,150],[1190,400],[1020,640],[760,520],[640,680],[400,700],[220,620],[100,400]],
 'ヘアピン蛇行':[[140,130],[1100,130],[1170,230],[1100,330],[300,330],[190,430],[300,530],[1100,530],[1170,630],[1100,710],[140,710],[70,420]]};
 let P=PRE['サーキット'].map(p=>p.slice()),RAW,C,N,ta,mask;
-const NAMES=Object.keys(PRE),ROT=3,mcache={};
+const NAMES=Object.keys(PRE),ROT=3,mcache={},INP=new Float32Array(6),ACS=ANG.map(Math.cos),ASN=ANG.map(Math.sin),HID=new Float32Array(NH),OUT=[0,0];
 const cr=(a,b,c,d,t)=>[0,1].map(i=>.5*(2*b[i]+(-a[i]+c[i])*t+(2*a[i]-5*b[i]+4*c[i]-d[i])*t*t+(-a[i]+3*b[i]-3*c[i]+d[i])*t*t*t));
 function mk(){const c=document.createElement('canvas');c.width=W;c.height=H;return c}
 const tc=mk(),tx=tc.getContext('2d'),mc=mk(),mx=mc.getContext('2d',{willReadFrequently:true});
@@ -150,15 +151,15 @@ line('pct',V('--acc'),v=>T+ph*(1-v/100));line('lap',V('--gold'),v=>T+ph*(1-v/tma
 const gl=hist.filter(d=>d.g);x.fillStyle=V('--mute');x.textAlign='left';x.fillText('世代 '+gl[0].g,L,h-6);x.textAlign='right';x.fillText('世代 '+gl[gl.length-1].g+'（点線＝コース変更）',w-R,h-6)}
 class Brain{
 constructor(w){this.w=w||Float32Array.from({length:NW},gauss)}
-f(inp){const w=this.w,h=[];let k=0;
-for(let j=0;j<NH;j++){let s=w[k++];for(let i=0;i<NI;i++)s+=w[k++]*inp[i];h.push(Math.tanh(s))}
-const o=[];for(let j=0;j<NO;j++){let s=w[k++];for(let i=0;i<NH;i++)s+=w[k++]*h[i];o.push(Math.tanh(s))}return o}}
+f(inp){const w=this.w,h=HID;let k=0;
+for(let j=0;j<NH;j++){let s=w[k++];for(let i=0;i<NI;i++)s+=w[k++]*inp[i];h[j]=Math.tanh(s)}
+const o=OUT;for(let j=0;j<NO;j++){let s=w[k++];for(let i=0;i<NH;i++)s+=w[k++]*h[i];o[j]=Math.tanh(s)}return o}}
 class Car{
 constructor(b){this.b=b;const q=C[SI],q2=C[(SI+1)%N];this.x=q[0];this.y=q[1];this.a=Math.atan2(q2[1]-q[1],q2[0]-q[0]);this.v=part?3:0;this.idx=SI;this.prog=0;this.sec=[];this.gr=0;this.max=0;this.t=0;this.last=0;this.alive=true;this.done=false;this.path=[];this.fit=0;this.rays=[];this.thr=0}
 step(){
-const inp=[];this.rays=[];
-for(const d of ANG){let r=0;const ca=Math.cos(this.a+d),sa=Math.sin(this.a+d);while(r<RM&&on(this.x+ca*r,this.y+sa*r))r+=4;this.rays.push(r);inp.push(r/RM)}
-inp.push(this.v/VM);
+const inp=INP,cA=Math.cos(this.a),sA=Math.sin(this.a);
+for(let q=0;q<5;q++){let r=0;const ca=cA*ACS[q]-sA*ASN[q],sa=sA*ACS[q]+cA*ASN[q];while(r<RM&&on(this.x+ca*r,this.y+sa*r))r+=4;inp[q]=r/RM}
+inp[5]=this.v/VM;
 const[st,th]=this.b.f(inp);this.thr=th;
 this.v+=th>0?th*.16:th*.4;this.v=Math.min(VM,Math.max(0,this.v*.992));
 this.a+=st*.075*Math.min(1,this.v)/(1+this.v*this.v*.07);
@@ -169,7 +170,7 @@ let dl=best-this.idx;if(dl>N/2)dl-=N;if(dl<-N/2)dl+=N;
 this.idx=best;this.prog+=dl;
 if(this.prog>this.max){const g=gt[this.idx];if(g)this.gr+=(this.prog-this.max)*Math.max(0,1-Math.hypot(this.x-g[0],this.y-g[1])/HW);this.max=this.prog;this.last=this.t}
 while(this.sec.length<K&&this.max>=bnd[this.sec.length+1])this.sec.push(this.t);
-if(this.t%3==0)this.path.push([this.x,this.y]);
+if(this.t%PS==0)this.path.push([this.x,this.y]);
 if(this.max>=LEN){this.done=true;this.alive=false}
 else if(!on(this.x,this.y)||this.t-this.last>100||this.t>MAXT)this.alive=false}}
 let cars,gen,bestT,bestPath,allBest;
@@ -177,14 +178,14 @@ const $=id=>document.getElementById(id);
 function sect(){SI=part?Math.round(secA/100*N)%N:0;LEN=part?Math.max(4,Math.round((secB-secA)/100*N)):N;bnd=Array.from({length:K+1},(_,k)=>Math.round(k*LEN/K))}
 function init(keep){
 const bs=keep&&cars&&cars.length?cars.slice().sort((a,b)=>(b.fit||b.max)-(a.fit||a.max)).map(c=>c.b):null;
-if(!bs)gen=1;bestT=Infinity;bestPath=null;allBest=0;sect();mkGuide();secBest=Array(K).fill(Infinity);secW=Array(K).fill(null);secP=Array(K).fill(null);ELITE=Math.max(2,Math.round(POP*.07));
+if(!bs)gen=1;bestT=Infinity;bestPath=null;allBest=0;sect();mkGuide();secBest=Array(K).fill(Infinity);secW=Array(K).fill(null);secP=Array(K).fill(null);ELITE=Math.max(2,Math.round(POP*.07));PS=POP>3000?9:POP>1000?6:3;
 cars=Array.from({length:POP},(_,i)=>{if(!bs)return new Car(new Brain());const w=bs[i%bs.length].w.slice();if(i>=bs.length)for(let j=0;j<NW;j++)if(Math.random()<.1)w[j]+=gauss()*.2;return new Car(new Brain(w))})}
 function endGen(){
 const gb=Array(K).fill(null);
 for(const c of cars)for(let k=0;k<c.sec.length;k++){const d=Math.max(1,c.sec[k]-(k?c.sec[k-1]:0));if(!gb[k]||d<gb[k].d)gb[k]={d,c}}
-for(let k=0;k<K;k++)if(gb[k]&&gb[k].d<secBest[k]){secBest[k]=gb[k].d;secW[k]=gb[k].c.b.w.slice();const c=gb[k].c,te=c.sec[k],ts=k?c.sec[k-1]:0;secP[k]=c.path.slice(Math.max(0,Math.ceil(ts/3)-1),Math.floor(te/3)+1)}
+for(let k=0;k<K;k++)if(gb[k]&&gb[k].d<secBest[k]){secBest[k]=gb[k].d;secW[k]=gb[k].c.b.w.slice();const c=gb[k].c,te=c.sec[k],ts=k?c.sec[k-1]:0;secP[k]=c.path.slice(Math.max(0,Math.ceil(ts/PS)-1),Math.floor(te/PS)+1)}
 for(const c of cars){let sb=0;for(let k=0;k<c.sec.length;k++){const d=Math.max(1,c.sec[k]-(k?c.sec[k-1]:0));sb+=50*Math.pow(secBest[k]/d,2)}
-c.fit=Math.min(c.max,LEN)+sb+gw*c.gr+(c.done?1000+(MAXT-c.t)*2:0);
+c.fit=Math.min(c.max,LEN)+sb+gw*c.gr+ws*c.max*Math.min(1.2,c.max/Math.max(1,c.t))/1.2+(c.done?1000+(MAXT-c.t)*2:0);
 if(c.done&&c.t<bestT){bestT=c.t;bestPath=c.path}}
 cars.sort((a,b)=>b.fit-a.fit);
 hist.push({g:gen,pct:Math.min(100,cars.reduce((a,c)=>Math.max(a,c.max),0)/LEN*100),lap:bestT<Infinity?bestT/60:null,tot:secBest.every(v=>v<Infinity)?secBest.reduce((a,v)=>a+v,0)/60:null});
@@ -250,6 +251,7 @@ $('rst').onclick=()=>{hist=[];hof=[];init(false);drawGraph()};
 $('gbtn').onclick=()=>{gmode=!gmode;if(gmode&&edit)$('edt').click();$('gbtn').classList.toggle('on',gmode);$('ghint').hidden=!gmode;cv.style.touchAction=gmode?'none':'';cv.style.cursor=gmode?'crosshair':''};
 $('gclr').onclick=()=>{gs=[];mkGuide()};
 $('bw').oninput=e=>{bs=+e.target.value/100;$('bwv').textContent=e.target.value+'%'};
+$('sw').oninput=e=>{ws=+e.target.value/100;$('swv').textContent=e.target.value+'%'};
 $('gw').oninput=e=>{gw=+e.target.value/100;$('gwv').textContent=e.target.value+'%'};
 $('integ').onchange=e=>{integ=e.target.checked;$('evalb').style.display=integ?'':'none';if(integ){ci=Math.max(0,NAMES.indexOf($('pre').value));$('keep').checked=true}};
 drawGraph();
